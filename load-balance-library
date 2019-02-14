@@ -1,0 +1,190 @@
+%dw 1.0
+%output application/json skipNullOn = "everywhere"
+%function getSize(p) ((sizeOf p) when p!= null otherwise 0)
+%function getSeatRow(sr)  ( sr[0] when (sizeOf sr) == 2 otherwise  sr[0..1] when (sizeOf sr) == 3 otherwise null)
+%function getSeatColumn(sc) (sc[1] when  (sizeOf sc) == 2 otherwise  sc[2] when (sizeOf sc) == 3 otherwise null)
+%function transferCondition(p,v)   p contains  (v as :string) 
+%function IBTransfercondition(p) true when p contains "IB" otherwise false
+%function outBoundTransferCondition(p) true when p contains "OB" otherwise false
+%function inBoundTransferCondition(p) true when p contains "IB" otherwise false
+%function getWheelchair(p) ( "WCHR" when (p contains "WCHR") otherwise 
+						"WCHS" when (p contains "WCHS") otherwise
+						 "WCHC" when (p contains "WCHC") otherwise
+						 "WCBD" when (p contains "WCBD") otherwise
+						 "WCBW" when (p contains "WCBW") otherwise
+						 "WCMP" when (p contains "WCMP") otherwise
+						 "WCOB" when (p contains "WCOB") otherwise
+						  null)
+%function getDocs(p) ( "INF" when (p contains "INF") otherwise 
+						"CHD" when (p contains "CHD") otherwise
+						 "DOCS")
+%function getTransfer(p)  ("INF" when ((p contains "INF") and (p contains "OB")) otherwise 
+							"CHD" when ((p contains "CHD") and (p contains "OB" )) otherwise 
+							"DOCS")
+%function getIBTransfer(p) ("INF" when ((p contains "INF") and (p contains "IB")) otherwise 
+							"CHD" when ((p contains "CHD") and (p contains "IB" )) otherwise 
+							"DOCS")
+%function getAnimalInHold(p) ("AVIH" when (p contains "AVIH") otherwise								  
+							      null)
+%function getUnaccompaniedMin(p) ("UMNR" when (p contains "UMNR") otherwise								  
+							      null)
+%function getAnimalInCabin(p) ("ESAN" when (p contains "ESAN") otherwise										
+								"SVAN" when (p contains "SVAN") otherwise 
+								"PETC" when (p contains "PETC") otherwise
+							   null)						
+%function getSeatOccupation(p) (   "K" when (p == "CHD") otherwise  "Q" when (p == "INF") otherwise "A")
+%var passengerList = (p) -> p[0]
+%var flightDetails = (p) -> p[1]
+%var availableSeats = (flightDetails) -> {"Y" : flightDetails.PassengerCounts[0].Available , "F" : flightDetails.PassengerCounts[1].Available }
+%var authorizedSeats = (flightDetails) -> {"Y" : flightDetails.PassengerCounts[0].Authorized , "F" : flightDetails.PassengerCounts[1].Authorized }
+%function splitText(text) text[0] splitBy " "
+%var OBConnectingInfo =  (passengerList) -> passengerList.passengerInfoList.passengerInfo filter ($.freeTextInfoList.freeTextInfo[0].editCode == "OB") map ((pax, indexPax) -> 
+	{			
+			bagCount : pax.bagCount,
+			editCode : pax.freeTextInfoList.freeTextInfo[0].editCode,
+			airlineFlightcode:  using (parts = splitText(pax.freeTextInfoList.freeTextInfo[0].textLine.text) ){
+				aFcode : parts[0] ++ "-" ++ parts[1],
+				airlineCode : parts[0],
+				FlightNumber : parts[1]
+			} 
+		}
+ )
+%var IBConnectingInfo =  (passengerList) -> passengerList.passengerInfoList.passengerInfo filter ($.freeTextInfoList.freeTextInfo[0].editCode == "IB") map ((pax, indexPax) -> 
+	{			
+			bagCount : pax.bagCount,
+			editCode : pax.freeTextInfoList.freeTextInfo[0].editCode,
+			airlineFlightcode:  using (parts = splitText(pax.freeTextInfoList.freeTextInfo[0].textLine.text) ){
+				aFcode : parts[0] ++ "-" ++ parts[1],
+				airlineCode : parts[0],
+				FlightNumber : parts[1]
+			} 
+		}
+ )
+%var DistinctPassengerGroup =  (passengerList) -> passengerList.passengerInfoList.passengerInfo filter ($.groupCode != null and ((sizeOf $) >= 10)) distinctBy $.groupCode
+%var PassengerGroup =  (passengerList) -> passengerList.passengerInfoList.passengerInfo filter ($.groupCode != null) map ((pax, indexPax) -> 
+	{			
+			groupCode : pax.groupCode
+		}
+ )
+%var PassengerGroupGreaterThanTen = (PassengerGroup) -> PassengerGroup groupBy $.groupCode filter ((sizeOf $) >= 10) map
+ {
+ 	PassengerGroupSize: $.groupCode
+ }
+%var unitQualifierCode = ["BOO", "ADT", "CHI", "INF", "NRC", "CUA","TBO","TCA","TBOI","TCAI"]
+%var groupByBookingClass = (passengerList) -> passengerList.passengerInfoList.passengerInfo groupBy $.cabin map ((pax, indexPax) ->
+{
+	bc : pax.cabin[0],
+	booked : pax, 
+	bookedWithoutTransfers: pax, 
+	seatMapPax:  (pax[?(($.seat != null))]) default null,
+	adultType: (pax[?((getDocs($.editCodeList.editCode) == "DOCS") )]),
+	childType: (pax[?((getDocs($.editCodeList.editCode) == "CHD"))]),
+	infantType: (pax[?((getDocs($.editCodeList.editCode) == "INF"))]),
+	nonRev: ((pax[?(($.indicators.indicator contains 'NonRevenue'))])),
+	TravellingwithoutTransfer: (pax[?((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true'))]),
+	wheelchairPax: ((pax[?((getWheelchair($.editCodeList.editCode) == "WCHR") or (getWheelchair($.editCodeList.editCode) == "WCHS") or  (getWheelchair($.editCodeList.editCode) == "WCHC") or  (getWheelchair($.editCodeList.editCode) == "WCBD") or  (getWheelchair($.editCodeList.editCode) == "WCBW") or  (getWheelchair($.editCodeList.editCode) == "WCMP") or  (getWheelchair($.editCodeList.editCode) == "WCOB"))])),
+	adultTravelling: ((pax[?((getDocs($.editCodeList.editCode) == "DOCS") and ((($.boardingInfo.boardStatus) == 'false') and  (($.checkInInfo.checkInStatus) == 'true')))])),
+	childTravelling: ((pax[?((getDocs($.editCodeList.editCode) == "CHD") and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') ))])), 
+	infantTravelling: ((pax[?((getDocs($.editCodeList.editCode) == "INF") and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true')))])),
+	animalInHold: ((pax[?((getAnimalInHold($.editCodeList.editCode) == "AVIH"))])),
+	unaccompaniedMinor: ((pax[?((getUnaccompaniedMin($.editCodeList.editCode) == "UMNR"))])),
+	emotionalSupportAnimal: ((pax[?((getAnimalInCabin($.editCodeList.editCode) == "ESAN"))])),
+	serviceAnimal: ((pax[?((getAnimalInCabin($.editCodeList.editCode) == "SVAN"))])),
+	petInCabin: ((pax[?((getAnimalInCabin($.editCodeList.editCode) == "PETC"))])),
+	nonRevTravelling: ((pax[?(($.indicators.indicator contains 'NonRevenue') and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') ))])),
+	outBoundTransferBooked: (pax[?((outBoundTransferCondition($.editCodeList.editCode)) == true)]),
+	adultOBTransferboooked: (pax[?((getTransfer($.editCodeList.editCode) == "DOCS") and (outBoundTransferCondition($.editCodeList.editCode)) == true)]), 
+	childOBTransferbooked: (pax[?((getTransfer($.editCodeList.editCode) == "CHD") and (outBoundTransferCondition($.editCodeList.editCode)) == true)]),
+	nonRevOBTransferBooked: ((pax[?(($.indicators.indicator contains 'NonRevenue') and (outBoundTransferCondition($.editCodeList.editCode)) == true)])),
+	infantOBTransferbooked: (pax[?((getTransfer($.editCodeList.editCode) == "INF") and (outBoundTransferCondition($.editCodeList.editCode)) == true)]),
+	outBoundTransferAccepted: (pax[?((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (outBoundTransferCondition($.editCodeList.editCode)) == true)]),
+	adultOBTransferAccepted: ((pax[?((getTransfer($.editCodeList.editCode) == "DOCS" ) and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (outBoundTransferCondition($.editCodeList.editCode)) == true))])),
+	childOBTransferAccepted: ((pax[?((getTransfer($.editCodeList.editCode) == "CHD" ) and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (outBoundTransferCondition($.editCodeList.editCode)) == true))])),
+	infantOBTransferAccepted: ((pax[?((getTransfer($.editCodeList.editCode) == "INF" ) and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (outBoundTransferCondition($.editCodeList.editCode)) == true))])),
+	nonRevOBTransferAccepted: ((pax[?(($.indicators.indicator contains 'NonRevenue') and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (outBoundTransferCondition($.editCodeList.editCode)) == true))])),
+	inBoundTransferBooked: (pax[?((inBoundTransferCondition($.editCodeList.editCode)) == true)]),
+	adultIBTransferboooked: (pax[?((getIBTransfer($.editCodeList.editCode) == "DOCS") and (inBoundTransferCondition($.editCodeList.editCode)) == true)]), 
+	childIBTransferbooked: (pax[?((getIBTransfer($.editCodeList.editCode) == "CHD") and (inBoundTransferCondition($.editCodeList.editCode)) == true)]),
+	infantIBTransferbooked: (pax[?((getIBTransfer($.editCodeList.editCode) == "INF") and (inBoundTransferCondition($.editCodeList.editCode)) == true)]),
+	nonRevIBTransferBooked: ((pax[?(($.indicators.indicator contains 'NonRevenue') and (inBoundTransferCondition($.editCodeList.editCode)) == true)])),
+	inBoundTransferAccepted: (pax[?((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (transferCondition($.editCodeList.editCode,'IB')))]),
+	adultIBTransferAccepted: ((pax[?((getIBTransfer($.editCodeList.editCode) == "DOCS" ) and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (inBoundTransferCondition($.editCodeList.editCode)) == true))])),
+	childIBTransferAccepted: ((pax[?((getIBTransfer($.editCodeList.editCode) == "CHD" ) and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (inBoundTransferCondition($.editCodeList.editCode)) == true))])),
+	infantIBTransferAccepted: ((pax[?((getIBTransfer($.editCodeList.editCode) == "INF" ) and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (inBoundTransferCondition($.editCodeList.editCode)) == true))])),
+	nonRevIBTransferAccepted: ((pax[?(($.indicators.indicator contains 'NonRevenue') and ((($.boardingInfo.boardStatus) == 'false') and (($.checkInInfo.checkInStatus) == 'true') and (inBoundTransferCondition($.editCodeList.editCode)) == true))])),
+	bags: pax.bagCount,
+	acceptedBags: (pax[?(($.boardingInfo.boardStatus) == 'true')])
+	
+ 
+})
+%var PaxFigures = (groupByBookingClass) -> groupByBookingClass  map (
+{
+	
+	bookingClass : $.bc,
+	adult: getSize($.adultType),
+	child: getSize($.childType),
+	infant: getSize($.infantType),
+	booked: getSize($.bookedWithoutTransfers),
+	nonRev: getSize($.nonRev),
+	wheelchairCount: getSize($.wheelchairPax),
+	accepted: getSize($.TravellingwithoutTransfer),
+	acceptedAdult: getSize($.adultTravelling),
+	acceptedChild: getSize($.childTravelling),
+	acceptedInfant: getSize($.infantTravelling),
+	acceptedNonRev: getSize($.nonRevTravelling),
+	animalInHold: getSize($.animalInHold),
+	unaccompaniedMinor : getSize($.unaccompaniedMinor),
+	emotionalSupportAnimal : getSize($.emotionalSupportAnimal),
+	serviceAnimal : getSize($.serviceAnimal),
+	petInCabin : getSize($.petInCabin),
+	OBTransferBooked: getSize($.outBoundTransferBooked),
+	OBNonRevBooked: getSize($.nonRevOBTransferBooked),
+	OBadulttransferBooked: getSize($.adultOBTransferboooked),
+	OBchildTransferBooked: getSize($.childOBTransferbooked),
+	OBinfantTransferBooked: getSize($.infantOBTransferbooked),
+	OBTransferAccepted: getSize($.outBoundTransferAccepted),
+	OBadultTransferAccepted: getSize($.adultOBTransferAccepted),
+	OBchildTransferAccepted: getSize($.childOBTransferAccepted),
+	OBinfantTransferAccepted: getSize($.infantOBTransferAccepted),
+	OBnonRevTransferAccepted: getSize($.nonRevOBTransferAccepted),
+	IBTransferBooked: getSize($.inBoundTransferBooked),
+	NonRevIBTransferBooked: getSize($.nonRevIBTransferBooked),
+	IBadulttransferBooked:getSize($.adultIBTransferboooked),
+	IBchildTransferBooked: getSize($.childIBTransferbooked),
+	IBinfantTransferBooked: getSize($.infantIBTransferbooked),
+	IBTransferAccepted: getSize($.inBoundTransferAccepted),
+	IBadulttransferAccepted: getSize($.adultIBTransferAccepted),
+	IBchildTransferAccepted: getSize($.childIBTransferAccepted),
+	IBinfantTransferAccepted: getSize($.infantIBTransferAccepted),
+	IBnonRevTransferAccepted: getSize($.nonRevIBTransferAccepted),
+	bookedBag: $.booked,
+	acceptedBag: $.TravellingwithoutTransfer,
+	outBoundbookedbags:$.outBoundTransferBooked,
+	outBoundAcceptedbags:$.outBoundTransferAccepted,
+	inBoundbookedbags:$.inBoundTransferBooked,
+	inBoundAcceptedbags:$.inBoundTransferAccepted,
+	seatMap: $.booked 
+})
+
+---
+{   
+	PaxFigures : PaxFigures,
+	passengerList : passengerList,
+    flightDetails : flightDetails,
+    availableSeats : availableSeats,
+    authorizedSeats : authorizedSeats,
+    groupByBookingClass : groupByBookingClass,
+    unitQualifierCode : unitQualifierCode,
+    getSeatRow : getSeatRow,
+    getSeatColumn : getSeatColumn,
+    getSeatOccupation : getSeatOccupation,
+    getDocs : getDocs,
+    transferCondition: transferCondition,
+	OBConnectingInfo: OBConnectingInfo,
+	IBConnectingInfo: IBConnectingInfo,
+	DistinctPassengerGroup: DistinctPassengerGroup,
+	PassengerGroup: PassengerGroup,
+	PassengerGroupGreaterThanTen: PassengerGroupGreaterThanTen
+    
+
+}
