@@ -1,0 +1,330 @@
+%dw 1.0
+%output application/json skipNullOn = "everywhere"
+%var passengerWeightAndBalanceFunctions = readUrl("classpath://dataweaves/passenger-weight-balance-library.dwl")
+%var passengerList = payload[0]
+%var flightDetails = payload[1]
+%var groupByBookingClass = passengerWeightAndBalanceFunctions.groupByBookingClass(passengerList)
+%var OBTransferBooked = groupByBookingClass.outBoundTransferBooked
+%var IBTransferBooked = groupByBookingClass.inBoundTransferBooked
+%var PaxFigures = passengerWeightAndBalanceFunctions.PaxFigures(groupByBookingClass)
+%var unitQualifierCode = passengerWeightAndBalanceFunctions.unitQualifierCode
+%var authorizedSeats = passengerWeightAndBalanceFunctions.authorizedSeats(flightDetails)
+%var availableSeats = passengerWeightAndBalanceFunctions.availableSeats(flightDetails)
+%var seatMap = passengerWeightAndBalanceFunctions.seatMap(passengerList)
+%var getSeatRow = passengerWeightAndBalanceFunctions.getSeatRow
+%var getSeatColumn = passengerWeightAndBalanceFunctions.getSeatColumn
+%var getSeatOccupation = passengerWeightAndBalanceFunctions.getSeatOccupation
+%var getDocs = passengerWeightAndBalanceFunctions.getDocs
+%var transferCondition = passengerWeightAndBalanceFunctions.transferCondition
+%var OBConnectingInfo = passengerWeightAndBalanceFunctions.OBConnectingInfo(passengerList)
+%var IBConnectingInfo = passengerWeightAndBalanceFunctions.IBConnectingInfo(passengerList)
+%var DistinctPassengerGroup = passengerWeightAndBalanceFunctions.DistinctPassengerGroup(passengerList)
+%var PassengerGroup = passengerWeightAndBalanceFunctions.PassengerGroup(passengerList)
+%var PassengerGroupGreaterThanTen = passengerWeightAndBalanceFunctions.PassengerGroupGreaterThanTen(PassengerGroup) filter ($ != {})
+%var seatMap=  payload[0].passengerInfoList.passengerInfo map ((pax , index) -> {
+    
+    seatMap: {
+        seat: pax.seat,
+        bookingClass: pax.bookingClass,
+        boardStatus: pax.boardingInfo.boardStatus,
+        paxType: pax.vcrinfo.vcrdata[0].type
+    } when pax.seat != null otherwise 'a'
+    
+}) filter ($.seatMap != 'a')
+%var totalBagCount = (a) -> ((a default []) reduce (cVal,acc = 0) -> acc +( cVal when cVal != "NB" otherwise "0"))
+---
+{
+	
+	aircraftType: passengerList.itineraryInfo.itinerary.aircraftType,
+	airline: passengerList.itineraryInfo.itinerary.airline,
+	departureDate: passengerList.itineraryInfo.itinerary.departureDate,
+	destination: passengerList.itineraryInfo.itinerary.destination,
+	flight: passengerList.itineraryInfo.itinerary.flight,
+	departureGate: passengerList.itineraryInfo.departureGate,
+	origin: passengerList.itineraryInfo.itinerary.origin,
+	cabinDetails: 
+		(PaxFigures map ({
+			bookingClass: $.bookingClass,
+			passengerFigures: [{
+				cabinFiguresBooked: {
+					quantityDetails: [{
+						numberOfUnit: $.booked,
+						unitQualifier: unitQualifierCode[0]
+					},
+					{
+						numberOfUnit: $.adult,
+						unitQualifier: unitQualifierCode[1]
+					},
+					{
+						numberOfUnit: $.child,
+						unitQualifier: unitQualifierCode[2]
+					},
+					{
+						numberOfUnit: $.infant,
+						unitQualifier: unitQualifierCode[3]
+					},
+					{
+						numberOfUnit: $.nonRev,
+						unitQualifier: unitQualifierCode[4]
+					}]
+				},
+				baggageDetailsBooked: {
+					checkedBaggageDetails: {
+						 number:   totalBagCount($.bookedBag.bagCount) // reduce ($$ + $) default 0
+					},
+					"baggageRefDetails": {
+						"indicator": p('indicator')
+					}
+				
+				}},
+				{
+				cabinFiguresAccepted: {
+					quantityDetails: [{
+						numberOfUnit: $.accepted,
+						unitQualifier: unitQualifierCode[5]
+					},
+					{
+						numberOfUnit: $.acceptedAdult,
+						unitQualifier: unitQualifierCode[1]
+					},
+					{
+						numberOfUnit: $.acceptedChild,
+						unitQualifier: unitQualifierCode[2]
+					},
+					{
+						numberOfUnit: $.acceptedInfant,
+						unitQualifier: unitQualifierCode[3]
+					},
+					{
+						numberOfUnit: $.acceptedNonRev,
+						unitQualifier: unitQualifierCode[4]
+					}]
+				},
+				baggageDetailsAccepted: {
+					checkedBaggageDetails: {
+						number: totalBagCount($.acceptedBag.bagCount)  //reduce ($$ + $) default 0
+					},
+				baggageRefDetails:{
+					"indicator": p('indicator')
+				}	
+				}
+			},
+			{
+				cabinFiguresOutBoundTransferBooked: {
+					quantityDetails: [{
+						numberOfUnit: $.OBTransferBooked,
+						unitQualifier: unitQualifierCode[6]
+					},
+					{
+						numberOfUnit: $.OBadulttransferBooked,
+						unitQualifier: unitQualifierCode[1]
+					},
+					{
+						numberOfUnit: $.OBchildTransferBooked,
+						unitQualifier: unitQualifierCode[2]
+					},
+					{
+						numberOfUnit: $.OBinfantTransferBooked,
+						unitQualifier: unitQualifierCode[3]
+					},
+					{
+						numberOfUnit: $.OBNonRevBooked,
+						unitQualifier: unitQualifierCode[4]
+					}]
+				},
+				baggageDetailsOutBoundTransferBooked: {
+					checkedBaggageDetails: {
+						number: totalBagCount($.outBoundbookedbags.bagCount)  //reduce ($$ + $) default 0
+					},
+					baggageRefDetails: {
+						"indicator": p('indicator')
+					}
+				}
+			},
+			{
+				cabinFiguresOutBoundTransferAccepted: {
+					quantityDetails: [{
+						numberOfUnit: $.OBTransferAccepted,
+						unitQualifier: unitQualifierCode[7]
+					},
+					{
+						numberOfUnit: $.OBadultTransferAccepted,
+						unitQualifier: unitQualifierCode[1]
+					},
+					{
+						numberOfUnit: $.OBchildTransferAccepted,
+						unitQualifier: unitQualifierCode[2]
+					},
+					{
+						numberOfUnit: $.OBinfantTransferAccepted,
+						unitQualifier: unitQualifierCode[3]
+					},
+					{
+						numberOfUnit: $.OBnonRevTransferAccepted,
+						unitQualifier: unitQualifierCode[4]
+					}]
+				},
+				baggageDetailsOutBoundTransferAccepted: {
+					checkedBaggageDetails: {
+						number: totalBagCount($.outBoundAcceptedbags.bagCount)  //reduce ($$ + $) default 0
+					},
+					baggageRefDetails: {
+						"indicator": p('indicator')
+					}
+				}
+			},
+			{
+				cabinFiguresInBoundTransferBooked: {
+					quantityDetails: [{
+						numberOfUnit: $.IBTransferBooked,
+						unitQualifier: unitQualifierCode[8]
+					},
+					{
+						numberOfUnit: $.IBadulttransferBooked,
+						unitQualifier: unitQualifierCode[1]
+					},
+					{
+						numberOfUnit: $.IBchildTransferBooked,
+						unitQualifier: unitQualifierCode[2]
+					},
+					{
+						numberOfUnit: $.IBinfantTransferBooked,
+						unitQualifier: unitQualifierCode[3]
+					},
+					{
+						numberOfUnit: $.NonRevIBTransferBooked,
+						unitQualifier: unitQualifierCode[4]
+					}]
+				},
+				baggageDetailsInBoundTransferBooked: {
+					checkedBaggageDetails: {
+						number: totalBagCount($.inBoundbookedbags.bagCount)   //reduce ($$ + $) default 0
+					},
+					baggageRefDetails: {
+						"indicator": p('indicator')
+					}
+				}
+			},
+			{
+				cabinFiguresInBoundTransferAccepted: {
+					quantityDetails: [{
+						numberOfUnit: $.IBTransferAccepted,
+						unitQualifier: unitQualifierCode[9]
+					},
+					{
+						numberOfUnit: $.IBadulttransferAccepted,
+						unitQualifier: unitQualifierCode[1]
+					},
+					{
+						numberOfUnit: $.IBchildTransferAccepted,
+						unitQualifier: unitQualifierCode[2]
+					},
+					{
+						numberOfUnit: $.IBinfantTransferAccepted,
+						unitQualifier: unitQualifierCode[3]
+					},
+					{
+						numberOfUnit: $.IBnonRevTransferAccepted,
+						unitQualifier: unitQualifierCode[4]
+					}]
+				},
+				baggageDetailsInBoundTransferAccepted: {
+					checkedBaggageDetails: {
+						number: totalBagCount($.inBoundAcceptedbags.bagCount)  //reduce ($$ + $) default 0
+					},
+					baggageRefDetails: {
+						"indicator": p('indicator')
+					}
+				}
+			}
+			]
+		})),
+		seatMap: (PaxFigures map ({
+		
+			
+			bookingClass: $.bookingClass,
+			cabinLegCounters: {
+				//(flightDetails.PassengerCounts map ({
+				
+				quatityDetails:  [{
+					numberOfUnit: authorizedSeats[$.bookingClass] ,
+					unitQualifier: "SCC"
+				},
+				{
+					numberOfUnit: availableSeats[$.bookingClass],
+					unitQualifier: "AVL"
+				},
+				{
+					numberOfUnit: (flightDetails.ItineraryResponseList[0].SeatConfig),
+					unitQualifier: "CAP"
+				}]
+			//	}))
+				
+
+			},
+			
+			seatInformation: ( $.seatMap map  ( { 
+
+				
+					seatDetails: {
+						seatRowNumber: getSeatRow($.seat) when $.seat != null and $.seat[1] != "W" otherwise 0,
+						seatOccupationDetails: {
+							seatColumn: getSeatColumn($.seat) when $.seat != null and $.seat[1] != "W" otherwise 0,
+							seatOccupation: getSeatOccupation(getDocs($.editCodeList.editCode))
+						}
+					} when $.seat != null otherwise null,
+					accStatus:  {
+						statusInformation: {
+							indicator:  "CAC" when $.checkInInfo.checkInStatus == "true" otherwise "CAN"
+						}
+					} when $.seat != null otherwise null,
+					jumpSeatInformation: {
+						referenceDetails: {
+							jumpSeatType: "JSI",
+							jumpSeatValue: $.seat when $.seat[1] == "W" otherwise 0
+						}
+					} when  $.seat[1] == "W" otherwise null,
+					passengerDetails: {
+						destination: $.destination
+					} when $.seat != null otherwise null,
+					(transferPassenger: 
+						direction: 'IB' when (transferCondition($.editCodeList.editCode,'IB')) otherwise ('OB' when (transferCondition($.editCodeList.editCode,'OB'))  otherwise null)
+					) when (transferCondition($.editCodeList.editCode,'IB') or (transferCondition($.editCodeList.editCode,'OB')) )
+
+			} when $.seat != null otherwise null  ))   
+		
+		 } )),	
+		IBConnectingInformation: IBConnectingInfo groupBy $.airlineFlightcode.aFcode map
+				 {
+			ConnectionAirlineCode : $.airlineFlightcode.airlineCode[0],
+			ConnectionFlightNumber : $.airlineFlightcode.FlightNumber[0],
+			ConnectingPassengerCount : sizeOf $,		
+			ConnectingBagCount : sum $.bagCount - "NB"
+
+		},
+		OBConnectingInformation: OBConnectingInfo groupBy $.airlineFlightcode.aFcode map
+			 {
+			ConnectionAirlineCode : $.airlineFlightcode.airlineCode[0],
+			ConnectionFlightNumber : $.airlineFlightcode.FlightNumber[0],
+			ConnectingPassengerCount : sizeOf $,
+			ConnectingBagCount : sum $.bagCount - "NB"
+
+		   },
+		 WheelchairCount: sum PaxFigures.wheelchairCount,
+		 PassengerGroup: 
+		 {
+		 	PassengerGroupCount: sizeOf PassengerGroupGreaterThanTen,
+		 	
+		 
+		 	PassengerGroupDetails: PassengerGroup groupBy $.groupCode  filter ((sizeOf $) >= 10) map
+		 	{
+		 		PassengerGroupType: $.groupCode[0],
+		 		PassengerGroupSize: sizeOf $
+		 
+		 	}
+		 },		 
+		 animalInHold : sum PaxFigures.animalInHold,
+		 animalInCabin : (sum PaxFigures.emotionalSupportAnimal) + (sum PaxFigures.serviceAnimal) + (sum PaxFigures.petInCabin),
+		 unaccompaniedMinor : sum PaxFigures.unaccompaniedMinor
+	
+}
